@@ -1,16 +1,16 @@
 # modules/chatbot.py
-from langchain.chat_models import ChatOpenAI
+
+from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
-from langchain.schema import HumanMessage
 from dotenv import load_dotenv
 import os
 
-# Carregar variáveis de ambiente
+# Carregar variáveis do arquivo .env
 load_dotenv()
 
-# Inicializar o modelo (GPT-4, pode trocar por outro)
+# Inicializar o modelo da OpenAI (conversa geral)
 llm = ChatOpenAI(
-    model="gpt-4-turbo",  # ou "gpt-3.5-turbo"
+    model="gpt-4o-mini",       # podes usar "gpt-4-turbo" se preferires
     temperature=0.5,
     openai_api_key=os.getenv("OPENAI_API_KEY")
 )
@@ -22,10 +22,11 @@ def gerar_resposta(pergunta: str) -> str:
     if not pergunta:
         return "Por favor, digite uma pergunta."
 
+    # Template de prompt
     prompt = ChatPromptTemplate.from_template(
-        "És um tutor virtual educacional. Responde de forma clara e explicativa à pergunta: {pergunta}"
+        "És um tutor virtual educacional. Responde de forma clara, paciente e explicativa à seguinte pergunta: {pergunta}"
     )
 
     mensagens = prompt.format_messages(pergunta=pergunta)
-    resposta = llm(mensagens)
+    resposta = llm.invoke(mensagens)
     return resposta.content
