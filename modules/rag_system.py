@@ -1,6 +1,7 @@
 # modules/rag_system.py
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_mistralai import ChatMistralAI
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.chains import RetrievalQA
@@ -39,11 +40,8 @@ def carregar_base_conhecimento():
 db = carregar_base_conhecimento()
 retriever = db.as_retriever(search_kwargs={"k": 3})
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5)
+#llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5)
 
-qa_chain = RetrievalQA.from_chain_type(
-    llm=llm,
-    retriever=retriever,
-    return_source_documents=True
-)
+llm = ChatMistralAI(model="mistral-small", api_key=os.getenv("MISTRAL_API_KEY"))
+qa_chain = ConversationalRetrievalChain.from_llm(llm, retriever)
 
