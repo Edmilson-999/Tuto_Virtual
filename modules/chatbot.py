@@ -1,64 +1,85 @@
 """
-Módulo: chatbot.py
-------------------
-Gerencia a comunicação com o modelo de linguagem (OpenAI ou Mistral)
-para o Tutor Virtual Inteligente.
+modules/chatbot.py
+Módulo responsável por carregar o modelo de linguagem (LLM) e gerar respostas
+do Tutor Virtual Inteligente.
+Compatível com:
+- OpenAI (via langchain-openai)
+- Mistral (via langchain-mistralai)
 """
 
 import os
 from dotenv import load_dotenv
 
-# Carrega as variáveis do .env
+# Importações principais do LangChain
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage, SystemMessage
+
+# Carregar variáveis de ambiente (.env)
 load_dotenv()
 
-# Variáveis do ambiente
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-MISTRAL_KEY = os.getenv("MISTRAL_API_KEY")
-MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "openai").lower()
-
-# Imports condicionais
-if MODEL_PROVIDER == "mistral":
-    from langchain_mistralai import ChatMistralAI
-else:
-    from langchain_openai import ChatOpenAI
-
-
-def load_llm():
+# =======================================================================
+# 🔧 FUNÇÃO: Carregar modelo de linguagem
+# =======================================================================
+def load_llm(modelo: str = "Mistral"):
     """
-    Inicializa o modelo LLM conforme o provedor definido no .env.
+    Carrega o modelo de linguagem de acordo com a escolha do usuário.
+    Aceita: "Mistral" ou "OpenAI GPT-4"
     """
 
-    if MODEL_PROVIDER == "mistral":
-        if not MISTRAL_KEY:
-            raise ValueError("❌ MISTRAL_API_KEY não foi encontrada no .env")
+    if modelo == "OpenAI GPT-4":
+        from langchain_openai import ChatOpenAI
+        api_key = os.getenv("OPENAI_API_KEY")
 
-        print("✅ Usando modelo da Mistral")
-        llm = ChatMistralAI(
-            model=os.getenv("MISTRAL_MODEL", "mistral-small"),
-            api_key=MISTRAL_KEY,
-            temperature=0.7
+        if not api_key:
+            raise ValueError("❌ Chave API da OpenAI não encontrada. Defina OPENAI_API_KEY no arquivo .env.")
+
+        print("🔹 Carregando modelo OpenAI GPT-4...")
+        return ChatOpenAI(
+            model="gpt-4o-mini",  # modelo leve, rápido e eficiente
+            temperature=0.6,
+            api_key=api_key
+        )
+
+    elif modelo == "Mistral":
+        from langchain_mistralai import ChatMistralAI
+        api_key = os.getenv("MISTRAL_API_KEY")
+
+        if not api_key:
+            raise ValueError("❌ Chave API da Mistral não encontrada. Defina MISTRAL_API_KEY no arquivo .env.")
+
+        print("🔹 Carregando modelo Mistral...")
+        return ChatMistralAI(
+            model="mistral-large-latest",  # modelo atual da Mistral
+            temperature=0.6,
+            api_key=api_key
         )
 
     else:
-        if not OPENAI_KEY:
-            raise ValueError("❌ OPENAI_API_KEY não foi encontrada no .env")
-
-        print("✅ Usando modelo da OpenAI")
-        llm = ChatOpenAI(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            api_key=OPENAI_KEY,
-            temperature=0.7
-        )
-
-    return llm
+        raise ValueError(f"Modelo desconhecido: {modelo}. Use 'Mistral' ou 'OpenAI GPT-4'.")
 
 
-def get_response(llm, user_input):
+# =======================================================================
+# 🧩 FUNÇÃO: Gerar resposta do chatbot
+# =======================================================================
+def gerar_resposta(pergunta: str, llm=None):
     """
-    Gera uma resposta do chatbot.
+    Gera uma resposta textual para a pergunta do usuário.
+    Se nenhum LLM for passado, usa o modelo padrão (Mistral).
     """
-    try:
-        response = llm.invoke(user_input)
-        return response.content
-    except Exception as e:
-        return f"Ocorreu um erro ao processar a resposta: {str(e)}"
+
+    if llm is None:
+        llm = load_llm("Mistral")
+
+    prompt = ChatPromptTemplate.from_messages([
+        SystemMessage(content=(
+            "És um tutor virtual educacional especializado em ajudar alunos. "
+            "Explica conceitos com clareza, dá exemplos e adapta o tom conforme a dificuldade."
+        )),
+        HumanMessage(content=pergunta)
+    ])
+
+    # Geração da resposta
+    resposta = llm.invoke(prompt.format_messages())
+
+    # Retorna o texto puro da resposta
+    return resposta.content.strip()
