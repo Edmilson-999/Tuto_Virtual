@@ -1,169 +1,255 @@
 """
 modules/rag_system.py
-Módulo responsável por criar e carregar a base de conhecimento (RAG)
-usando PDFs e embeddings vetoriais com ChromaDB.
-Versão corrigida com imports compatíveis.
+Sistema RAG com correção de caminhos para Windows
 """
 
 import os
-from shutil import rmtree
+import shutil
 from dotenv import load_dotenv
+import logging
 
-# Importações compatíveis
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
-from langchain_mistralai import ChatMistralAI
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Importação alternativa para RetrievalQA baseada na versão
-try:
-    # Para versões mais recentes do LangChain
-    from langchain.chains import RetrievalQA
-except ImportError:
-    # Fallback para versões mais antigas
-    from langchain.chains.retrieval_qa.base import RetrievalQA
+# Suprimir warnings desnecessários
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
-# Carrega variáveis do .env
 load_dotenv()
 
 # Caminhos
 DOCS_PATH = "data/docs/"
 DB_PATH = "data/chroma_db/"
 
-# ===================================================================
-# 🧠 Função: Criar base de conhecimento a partir de PDFs
-# ===================================================================
-def criar_base_conhecimento(pdf_path: str):
-    """
-    Cria ou atualiza a base de conhecimento vetorial a partir de um PDF.
-    Divide o texto, gera embeddings e salva localmente no ChromaDB.
-    """
-    print(f"📘 Processando documento: {pdf_path}")
-    
+def carregar_embeddings_locais():
+    """Carrega modelo de embeddings local"""
     try:
-        loader = PyPDFLoader(pdf_path)
-        docs = loader.load()
-
-        # Dividir texto em blocos menores
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, 
-            chunk_overlap=200
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        
+        model_name = "sentence-transformers/all-MiniLM-L6-v2"
+        embeddings = HuggingFaceEmbeddings(
+            model_name=model_name,
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': False}
         )
-        textos = splitter.split_documents(docs)
+        
+        print("✅ Embeddings locais carregados")
+        return embeddings
+        
+    except Exception as e:
+        print(f"❌ Erro ao carregar embeddings: {e}")
+        raise
 
-        # Gerar embeddings com OpenAI
-        embeddings = OpenAIEmbeddings(api_key=os.getenv("OPENAI_API_KEY"))
+def criar_base_conhecimento(pdf_path: str):
+    """Cria base de conhecimento a partir de PDF"""
+    try:
+        from langchain_community.document_loaders import PyPDFLoader
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        from langchain_chroma import Chroma
+        
+        # Verificar se arquivo existe
+        if not os.path.exists(pdf_path):
+            print(f"   ❌ Arquivo não encontrado: {pdf_path}")
+            return None
+            
+        # Carregar PDF
+        loader = PyPDFLoader(pdf_path)
+        documentos = loader.load()
+        
+        if not documentos:
+            print(f"   ⚠️ PDF vazio ou corrompido: {pdf_path}")
+            return None
 
-        # Criar ou atualizar o banco vetorial
-        db = Chroma.from_documents(
-            documents=textos, 
-            embedding=embeddings, 
+        # Dividir texto
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=800,
+            chunk_overlap=100
+        )
+        chunks = splitter.split_documents(documentos)
+        
+        print(f"   📄 Criados {len(chunks)} chunks")
+
+        # Embeddings locais
+        embeddings = carregar_embeddings_locais()
+
+        # Criar vector store
+        vector_store = Chroma.from_documents(
+            documents=chunks,
+            embedding=embeddings,
             persist_directory=DB_PATH
         )
         
-        print("✅ Base de conhecimento atualizada com sucesso.")
-        return db
+        print(f"   ✅ PDF processado com sucesso")
+        return vector_store
         
     except Exception as e:
-        print(f"❌ Erro ao processar documento {pdf_path}: {e}")
-        raise
+        print(f"   ❌ Erro ao processar PDF: {e}")
+        return None
 
-# ===================================================================
-# 💾 Função: Carregar base de conhecimento existente
-# ===================================================================
 def carregar_base_conhecimento():
-    """
-    Carrega a base de conhecimento persistida em DB_PATH.
-    Versão corrigida para evitar erros de compatibilidade.
-    """
+    """Carrega base existente"""
     try:
-        embeddings = OpenAIEmbeddings(api_key=os.getenv("OPENAI_API_KEY"))
+        from langchain_chroma import Chroma
         
-        if os.path.exists(DB_PATH) and os.listdir(DB_PATH):
-            # Tenta carregar base existente
-            try:
-                db = Chroma(
-                    persist_directory=DB_PATH, 
-                    embedding_function=embeddings
-                )
-                print("✅ Base de conhecimento carregada com sucesso.")
-                return db
-            except Exception as e:
-                print(f"⚠️ Erro ao carregar base existente: {e}")
-                print("🧹 Recriando base de conhecimento...")
-                # Limpa o diretório e cria novo
-                try:
-                    rmtree(DB_PATH)
-                except:
-                    pass
-                
-        # Se não existir ou falhar ao carregar, cria diretório
-        os.makedirs(DB_PATH, exist_ok=True)
-        
-        # Cria uma nova base vazia
-        db = Chroma(
+        if not os.path.exists(DB_PATH) or not os.listdir(DB_PATH):
+            return None
+
+        embeddings = carregar_embeddings_locais()
+        vector_store = Chroma(
             persist_directory=DB_PATH,
             embedding_function=embeddings
         )
-        return db
+        
+        # Testar se funciona
+        count = vector_store._collection.count()
+        print(f"✅ Base carregada com {count} documentos")
+        return vector_store
         
     except Exception as e:
-        print(f"❌ Erro crítico ao carregar base: {e}")
-        raise
+        print(f"❌ Erro ao carregar base: {e}")
+        return None
 
-# ===================================================================
-# 🔗 Inicialização segura do sistema RAG
-# ===================================================================
 def inicializar_sistema_rag():
-    """
-    Inicializa o sistema RAG de forma segura, tratando possíveis erros.
-    """
+    """Inicializa sistema RAG"""
     try:
-        # Verificar se as API keys estão disponíveis
-        openai_key = os.getenv("OPENAI_API_KEY")
+        # Verificar API key do Mistral
         mistral_key = os.getenv("MISTRAL_API_KEY")
-        
-        if not openai_key or not mistral_key:
-            print("⚠️ API keys não encontradas. Sistema RAG desativado.")
+        if not mistral_key:
+            print("⚠️ Mistral API key não configurada")
             return None, None
 
-        # Carregar base de conhecimento
-        db = carregar_base_conhecimento()
-        
-        # Configurar retriever
-        retriever = db.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": 3}
-        )
+        # Carregar base
+        vector_store = carregar_base_conhecimento()
+        if not vector_store:
+            print("ℹ️ Nenhuma base encontrada. Adicione PDFs primeiro.")
+            return None, None
 
-        # Modelo Mistral
+        # Configurar LLM
+        from langchain_mistralai import ChatMistralAI
         llm = ChatMistralAI(
             model="mistral-small-latest",
             api_key=mistral_key,
             temperature=0.6
         )
 
-        # Criar cadeia de perguntas e respostas
+        # Configurar retriever
+        retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+
+        # Criar QA chain
+        from langchain.chains import RetrievalQA
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
             retriever=retriever,
-            return_source_documents=True,
-            verbose=False
+            return_source_documents=True
         )
         
-        return qa_chain, db
+        print("🚀 Sistema RAG inicializado com sucesso")
+        return qa_chain, vector_store
         
     except Exception as e:
-        print(f"❌ Erro ao inicializar sistema RAG: {e}")
+        print(f"❌ Erro ao inicializar RAG: {e}")
         return None, None
 
-# Inicialização condicional
-try:
-    qa_chain, db = inicializar_sistema_rag()
-    if qa_chain is None:
-        print("⚠️ Sistema RAG não foi inicializado. Verifique as API keys e dependências.")
-except Exception as e:
-    print(f"⚠️ Falha na inicialização do RAG: {e}")
-    qa_chain, db = None, None
+def processar_todos_pdfs():
+    """Processa todos os PDFs com caminhos corrigidos"""
+    try:
+        from utils.helpers import listar_pdfs, get_caminho_pdf, verificar_pdf_valido
+        
+        pdfs = listar_pdfs()
+        if not pdfs:
+            print("📭 Nenhum PDF encontrado em data/docs/")
+            return False
+
+        print(f"📚 Encontrados {len(pdfs)} PDFs para processar")
+        
+        # Limpar base anterior
+        if os.path.exists(DB_PATH):
+            shutil.rmtree(DB_PATH)
+            print("🧹 Base anterior removida")
+
+        success_count = 0
+        for pdf_nome in pdfs:
+            try:
+                # Obter caminho correto
+                pdf_path = get_caminho_pdf(pdf_nome)
+                
+                print(f"📘 Processando: {pdf_nome}")
+                
+                # Verificar se o arquivo existe
+                if not verificar_pdf_valido(pdf_path):
+                    print(f"   ❌ Arquivo inválido: {pdf_path}")
+                    continue
+                
+                # Processar PDF
+                if criar_base_conhecimento(pdf_path):
+                    success_count += 1
+                    print(f"   ✅ Sucesso")
+                else:
+                    print(f"   ❌ Falha")
+                    
+            except Exception as e:
+                print(f"   ❌ Erro: {e}")
+                continue
+
+        if success_count > 0:
+            print(f"🎉 {success_count}/{len(pdfs)} PDFs processados com sucesso!")
+            
+            # Recarregar sistema RAG
+            global qa_chain, vector_store
+            qa_chain, vector_store = inicializar_sistema_rag()
+            
+            return True
+        else:
+            print("❌ Nenhum PDF pôde ser processado")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Erro no processamento: {e}")
+        return False
+
+def limpar_base_conhecimento():
+    """Limpa a base de dados"""
+    try:
+        if os.path.exists(DB_PATH):
+            shutil.rmtree(DB_PATH)
+            print("🧹 Base de conhecimento limpa")
+            return True
+        return False
+    except Exception as e:
+        print(f"❌ Erro ao limpar base: {e}")
+        return False
+
+# Inicialização
+qa_chain, vector_store = inicializar_sistema_rag()
+
+# Teste
+if __name__ == "__main__":
+    print("🧪 Testando sistema RAG...")
+    
+    # Testar se PDFs estão acessíveis
+    from utils.helpers import listar_pdfs, get_caminho_pdf
+    
+    pdfs = listar_pdfs()
+    print(f"📁 PDFs encontrados: {len(pdfs)}")
+    
+    for pdf in pdfs:
+        caminho = get_caminho_pdf(pdf)
+        existe = os.path.exists(caminho)
+        print(f"   {pdf}: {'✅' if existe else '❌'} {caminho}")
+    
+    # Testar embeddings
+    try:
+        embeddings = carregar_embeddings_locais()
+        test_vector = embeddings.embed_query("teste")
+        print(f"✅ Embeddings: {len(test_vector)} dimensões")
+    except Exception as e:
+        print(f"❌ Erro nos embeddings: {e}")
+    
+    # Testar base
+    base = carregar_base_conhecimento()
+    if base:
+        print("✅ Base carregada - sistema pronto!")
+    else:
+        print("ℹ️ Execute o processamento de PDFs primeiro")
