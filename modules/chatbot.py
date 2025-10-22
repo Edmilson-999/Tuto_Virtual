@@ -34,7 +34,7 @@ def load_llm(modelo: str = "Mistral"):
             raise ValueError("❌ Chave API da OpenAI não encontrada. Defina OPENAI_API_KEY no arquivo .env.")
 
         print("🔹 Carregando modelo OpenAI GPT-4...")
-        return ChatOpenAI(
+        return ChatOpenAI( 
             model="gpt-4o-mini",  # modelo leve, rápido e eficiente
             temperature=0.6,
             api_key=api_key
