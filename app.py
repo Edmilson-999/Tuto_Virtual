@@ -1,11 +1,16 @@
 """
 app.py
-Tutor Virtual Inteligente - Versão Simplificada
+Tutor Virtual com Sistema de Memória Corrigido
 """
 
 import streamlit as st
 import os
-from modules.chatbot import gerar_resposta, load_llm
+from modules.chatbot import (
+    gerar_resposta_com_memoria, 
+    load_llm, 
+    limpar_memoria,
+    obter_tamanho_memoria
+)
 from modules.rag_system import qa_chain, processar_todos_pdfs
 from utils.helpers import listar_pdfs
 
@@ -16,11 +21,11 @@ st.set_page_config(
     layout="centered"
 )
 
-# ================= CABEÇALHO SIMPLES =================
-st.title("Tutor Virtual Inteligente")
-st.write("Faça perguntas e receba respostas com base nos seus documentos PDF.")
+# ================= CABEÇALHO =================
+st.title("🎓 Tutor Virtual Inteligente")
+st.write("Faça perguntas e receba respostas contextuais com memória de conversa.")
 
-# ================= SIDEBAR SIMPLIFICADA =================
+# ================= SIDEBAR =================
 with st.sidebar:
     st.header("📚 Documentos")
     
@@ -33,7 +38,6 @@ with st.sidebar:
         for pdf in pdfs:
             st.write(f"• {pdf}")
     
-    # Processamento de PDFs
     if st.button("🔄 Processar PDFs", type="secondary"):
         if pdfs:
             with st.spinner("Processando..."):
@@ -42,16 +46,23 @@ with st.sidebar:
                     st.rerun()
                 else:
                     st.error("Erro no processamento")
-        else:
-            st.warning("Nenhum PDF para processar")
     
     st.divider()
     
-    # Configurações simples
+    # Configurações
     st.header("⚙️ Configurações")
     modelo = st.selectbox("Modelo IA:", ["Mistral", "OpenAI GPT-4"])
     
-    # Verificar RAG
+    # Controles de memória
+    st.subheader("🧠 Memória")
+    st.info(f"Interações na memória: {obter_tamanho_memoria()}")
+    
+    if st.button("🧹 Limpar Memória", type="secondary"):
+        limpar_memoria()
+        st.success("Memória limpa!")
+        st.rerun()
+    
+    # Status RAG
     if qa_chain and pdfs:
         st.success("✅ RAG Ativo")
     else:
@@ -64,14 +75,19 @@ st.divider()
 if qa_chain and pdfs:
     modo = st.radio(
         "**Modo de resposta:**",
-        ["Com base nos PDFs", "Chatbot básico"],
+        ["Com base nos PDFs", "Chatbot com memória", "Chatbot básico"],
+        index=1,  # Default para memória
         horizontal=True
     )
 else:
-    modo = "Chatbot básico"
-    st.info("💡 Adicione PDFs e processe para ativar o modo com documentos")
+    modo = st.radio(
+        "**Modo de resposta:**",
+        ["Chatbot com memória", "Chatbot básico"],
+        index=0,
+        horizontal=True
+    )
 
-# Histórico do chat
+# Inicializar histórico na session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -92,21 +108,33 @@ if pergunta := st.chat_input("Digite sua pergunta..."):
     with st.chat_message("assistant"):
         with st.spinner("Pensando..."):
             try:
-                if modo == "Com base nos PDFs" and qa_chain:
+                llm = load_llm(modelo=modelo)
+                
+                if modo == "Com base nos PDFs":
                     resposta = qa_chain.invoke({"query": pergunta})
                     resposta_texto = resposta['result']
-                else:
-                    llm = load_llm(modelo=modelo)
-                    resposta_texto = gerar_resposta(pergunta, llm)
+                    
+                elif modo == "Chatbot com memória":
+                    resposta_texto = gerar_resposta_com_memoria(pergunta, llm, usar_memoria=True)
+                    
+                else:  # Chatbot básico
+                    resposta_texto = gerar_resposta_com_memoria(pergunta, llm, usar_memoria=False)
                 
                 st.markdown(resposta_texto)
-                st.session_state.messages.append({"role": "assistant", "content": resposta_texto})
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": resposta_texto
+                })
                 
             except Exception as e:
                 erro = f"Erro: {str(e)}"
                 st.error(erro)
                 st.session_state.messages.append({"role": "assistant", "content": erro})
 
-# ================= RODAPÉ SIMPLES =================
+# ================= EXEMPLOS DE USO =================
 st.divider()
-st.caption("Tutor Virtual • Desenvolvido com Streamlit e IA")
+st.write("💡 **Teste a memória:** Faça perguntas sequenciais como 'O que é Python?' depois 'E Java?'")
+
+# ================= RODAPÉ =================
+st.divider()
+st.caption("Tutor Virtual • Com sistema de memória • Desenvolvido com Streamlit e IA")
